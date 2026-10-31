@@ -54,7 +54,14 @@ EVENT_GROUPS = ("siren", "alarm", "doorbell", "crash", "baby")   # knocking come
 # Windows (of the last 3) that must score >= on_score: a doorbell, a crash or a knock lasts only a
 # second or two; a baby crying must go on for 2 windows, so one squeal isn't enough.
 MIN_WINDOWS = {"siren": 2, "alarm": 2, "doorbell": 1, "crash": 1, "knock": 1, "baby": 2}
-REARM_S = {"doorbell": 4.0, "crash": 4.0, "knock": 4.0}   # a second one after this is a new event (others: rearm_s)
+# A siren comes and goes as it wails: once the screen has cleared in a gap, it must be able to come
+# back at once, so a siren rearms after 1.5 s (deaf_mode drops a repeat while SIREN is still up).
+REARM_S = {"doorbell": 4.0, "crash": 4.0, "knock": 4.0, "siren": 1.5}   # a second one after this is a new event (others: rearm_s)
+# YAMNet spreads a police siren over "Siren", "Police car (siren)" and "Emergency vehicle", so each
+# scores lower than one alarm class would; a siren counts from the score that already puts it in
+# the screen's corner (0.2), and a far-off siren (a few dB over the room) still counts.
+ON_SCORE = {"siren": 0.2}            # others: on_score
+MIN_ABOVE_DB = {"siren": 3.0}        # others: min_above_db
 QUIET = {"Silence"}                 # what the screen's corner never shows
 DEFAULTS = {"on_score": 0.3, "off_score": 0.15, "min_above_db": 6.0, "rearm_s": 8.0}
 
@@ -126,10 +133,10 @@ class SoundClassifier:
         for g, v in group.items():
             self.history[g] = (self.history[g] + [v])[-3:]
         events = []
-        loud = above_db >= self.p["min_above_db"]
         for g in EVENT_GROUPS:
             h, ep = self.history[g], self.episode[g]
-            on = loud and sum(v >= self.p["on_score"] for v in h) >= MIN_WINDOWS[g]
+            loud = above_db >= MIN_ABOVE_DB.get(g, self.p["min_above_db"])
+            on = loud and sum(v >= ON_SCORE.get(g, self.p["on_score"]) for v in h) >= MIN_WINDOWS[g]
             if ep is not None:
                 if group[g] >= self.p["off_score"]:
                     ep["last"] = self.t
