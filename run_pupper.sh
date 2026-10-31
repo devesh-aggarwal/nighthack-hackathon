@@ -42,7 +42,7 @@ if [ ! -d /opt/ros/jazzy ]; then
     echo "laptop mic: streaming this laptop's input to Pupper (macOS may ask to let your terminal use the mic)"
     ( { ffmpeg -hide_banner -loglevel error -f avfoundation -i ":default" -ac 1 -ar 48000 -f s16le -flush_packets 1 - 2>"$MIC_ERR" &
         echo $! >"$MIC_PID"; wait; } \
-      | "$HERE/tools/pup" sh "bash ~/pupper-hackathon-setup/robot/laptop_mic.sh" ) &
+      | "$HERE/tools/pup" sh "bash ~/${PUPPER_REPO:-nighthack-hackathon}/robot/laptop_mic.sh" ) &
     sleep 4
     kill -0 "$(cat "$MIC_PID")" 2>/dev/null || { echo "laptop mic did not start: $(cat "$MIC_ERR")"; exit 1; }
 

@@ -102,8 +102,8 @@ parameters). The Robot API (`robot.queue`, `robot.switch_to`, ...) is documented
 Clone this whole repo onto the Pupper and run the setup script from its root:
 
 ```bash
-git clone https://github.com/codergautam/pupper-hackathon-setup.git ~/pupper-hackathon-setup
-cd ~/pupper-hackathon-setup
+git clone https://github.com/devesh-aggarwal/nighthack-hackathon.git ~/nighthack-hackathon
+cd ~/nighthack-hackathon
 robot/setup.sh
 ```
 
@@ -114,8 +114,9 @@ key is saved in `~/.config/gemini-pupper/api_key`, never in this repo. It is saf
 Keep `~/follow_me_pupper` (Lab 5) on the Pupper: follow mode runs it. The ROS 2 workspace that
 `start.sh` sources is `~/pupperv3-monorepo`.
 
-To update the Pupper later: `git pull` in `~/pupper-hackathon-setup` (or `./tools/pup sync` from a
-laptop), then restart.
+To update the Pupper later: `git pull` in `~/nighthack-hackathon` (or `./tools/pup sync` from a
+laptop), then restart. If your clone on the Pupper has another name, set `PUPPER_REPO` to it on the
+laptop: `tools/pup sync`, `tools/pup start` and `./run_pupper.sh --laptop` all use that folder.
 
 ## Running
 
@@ -128,7 +129,7 @@ On the Pupper, on the ground, with clear space around it, the quickest way is on
 ```
 
 The same command works from a laptop with this repo checked out: off the Pupper it syncs the repo
-to `~/pupper-hackathon-setup` on the Pupper (`tools/pup sync`) and runs `./run_pupper.sh` there over
+to `~/nighthack-hackathon` on the Pupper (`tools/pup sync`) and runs `./run_pupper.sh` there over
 SSH, so you see the live log on your laptop and Ctrl+C stops the robot. Run `tools/pup setup` once
 first (it installs an SSH key), and set `PUPPER_HOST` if your Pupper isn't `pi@pupper5.local`.
 
@@ -178,6 +179,30 @@ square", "follow me", "I'm deaf" (then knock on a table).
 
 Debugging: `tail -f /tmp/gemini-pupper/server.log` (your `lab/` code) and
 `/tmp/gemini-pupper/robot.log` (ROS 2); `curl localhost:8000/system/mode` shows the real state.
+
+### Slow Wi-Fi
+
+If Pupper answers seconds after you stop talking while deaf mode's sound alerts (which never leave
+the Pi) stay quick, the Wi-Fi uplink is the bottleneck. At a venue Pupper's uplink measured
+2-4 Mbit/s with 5-15 % packet loss, and three things share it while Pupper listens:
+
+- **Gemini Live**: your voice (16 kHz PCM, continuous) and one camera frame a second, over one
+  WebSocket, so a big frame delays the words behind it. The app scales frames to 512 px on the long
+  side before sending (`LIVE_FRAME_PX` in `web/services/geminiLive.ts`); **Settings → Enable Vision**
+  off stops the frames altogether. The session also ends a turn after about 0.6 s without speech
+  (`realtimeInputConfig` there, end sensitivity high) rather than waiting for a quiet a noisy room
+  never gives.
+- **Collapse watch**: one frame every 3 s to `gemini-flash-latest`, shrunk to 768 px (`MAX_PX` in
+  `vision/gemini_vision.py`). "Stop watching for falls" turns it off for the session.
+- **The eyes service**: a frame every 5 s while idle, about one a second while a search or follow
+  runs, to the eyes' model through Google's API. `PUPPER_EYES_GEMMA=off ./run_pupper.sh` keeps the
+  detector and depth on the Pi and sends nothing.
+
+To see it: `curl -s localhost:8000/camera/image | wc -c` is one raw frame; `cat
+/sys/class/net/wlan0/statistics/tx_bytes` twice, 10 s apart, is what actually leaves (with the app
+connected and nobody talking, expect tens of KB/s, not hundreds); `ping <router>` with loss or swings over 100 ms
+is the Wi-Fi itself, which no setting fixes: move Pupper nearer an access point or onto a phone's
+hotspot.
 
 ## Testing without the robot
 
@@ -273,7 +298,7 @@ and installs it on the Pi. The user `pi` has passwordless `sudo`.
 ./tools/pup sh 'free -h; uptime'           # run any command
 ./tools/pup run my_test.py arg1            # copy a local script to /tmp/pup on the Pi and run it
 ./tools/pup gui tools/examples/hello_pygame.py   # run it on Pupper's display
-./tools/pup sync                           # rsync this repo to ~/pupper-hackathon-setup on the Pi
+./tools/pup sync                           # rsync this repo to ~/nighthack-hackathon on the Pi
 ./tools/pup put ./file ~/dest  /  ./tools/pup get ~/file .
 ./tools/pup kill hello_pygame              # stop a runaway process
 ```
@@ -482,7 +507,9 @@ Every 3 s the server's watcher sends Pupper's latest camera frame to Gemini
 on the floor and may have collapsed: not sitting, not on a bed or sofa, not exercising. It needs
 internet and the Gemini key (`~/.config/gemini-pupper/api_key` or `$GEMINI_API_KEY`); without a
 key it stays off and the server log says so. Each check is one Gemini API call, about 1,200 an
-hour, and the frames go to Google.
+hour, and the frames go to Google, shrunk to 768 px on the long side first (`MAX_PX` in
+`vision/gemini_vision.py`: the camera's 1400 x 1050 frames were crowding out Gemini Live's voice
+stream on slow Wi-Fi; see [Slow Wi-Fi](#slow-wi-fi)).
 
 **What happens.** Seen twice in a row (one odd frame isn't enough):
 

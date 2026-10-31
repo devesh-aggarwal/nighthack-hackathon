@@ -8,7 +8,7 @@
 #   ./pup sudo <cmd...>         run a command as root on the Pi
 #   ./pup run <file> [args]     copy a local script to the Pi and run it (.py, .sh, or executable)
 #   ./pup gui <file> [args]     same as run, but attached to Pupper's display
-#   ./pup sync                  rsync this repo to ~/pupper-hackathon-setup on the Pi
+#   ./pup sync                  rsync this repo to ~/nighthack-hackathon on the Pi (PUPPER_REPO)
 #   ./pup put <local> [remote]  copy a file or folder to the Pi (default: ~/)
 #   ./pup get <remote> [local]  copy a file or folder from the Pi (default: .)
 #   ./pup kill <pattern>        kill processes on the Pi matching a pattern
@@ -16,14 +16,15 @@
 #                               PUP_TUNNEL=1 also forwards port 8000 while it runs)
 #
 # Env overrides: PUPPER_HOST (default pi@pupper5.local), PUPPER_KEY (default ~/.ssh/pupper_ed25519),
-# PUPPER_PASSWORD (used only by `setup`).
+# PUPPER_REPO (the repo's folder in the Pi's home, default nighthack-hackathon: the clone the Pupper
+# runs from, so `sync` and `start` change what actually runs), PUPPER_PASSWORD (used only by `setup`).
 
 set -euo pipefail
 
 HOST="${PUPPER_HOST:-pi@pupper5.local}"
 KEY="${PUPPER_KEY:-$HOME/.ssh/pupper_ed25519}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REMOTE_REPO="pupper-hackathon-setup"
+REMOTE_REPO="${PUPPER_REPO:-nighthack-hackathon}"
 SCRATCH="/tmp/pup"
 
 # Reuse one connection for all commands, so each call after the first is fast.

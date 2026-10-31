@@ -13,19 +13,30 @@ metre, has no body part or object on it. Pupper only walks forward when path_cle
 camera can't measure distance, so these are Gemini's estimates: collapse_watch.py keeps a wide
 margin and looks again after every short step.
 
-Only the standard library: no google-genai needed. The key comes from GEMINI_API_KEY or
-~/.config/gemini-pupper/api_key (robot/setup.sh writes it); it is sent in a header, never logged.
+The frame is shrunk to MAX_PX on its long side before it goes (Pillow; sent as it came if Pillow is
+missing). The camera's 1400 x 1050 JPEGs are on the order of 100-300 KB each, and one every 3 s on a venue's
+few-Mbit uplink crowded out Gemini Live's voice stream; a quarter of the pixels answers "is
+someone on the floor" just as well.
+
+No google-genai needed. The key comes from GEMINI_API_KEY or ~/.config/gemini-pupper/api_key
+(robot/setup.sh writes it); it is sent in a header, never logged.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import logging
 import os
 import urllib.request
 from pathlib import Path
+
+try:
+    from PIL import Image
+except ImportError:  # the frame goes as it came
+    Image = None
 
 log = logging.getLogger("vision")
 
@@ -33,6 +44,25 @@ KEY_FILE = Path.home() / ".config" / "gemini-pupper" / "api_key"
 MODEL = os.environ.get("PUPPER_VISION_MODEL", "gemini-flash-latest")
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 TIMEOUT_S = 10.0
+MAX_PX = 768  # the long side of the frame sent to Gemini
+JPEG_QUALITY = 80
+
+
+def shrink(jpeg: bytes, max_px: int = MAX_PX) -> bytes:
+    """The JPEG with its long side at most max_px (unchanged if already small, or without Pillow)."""
+    if Image is None:
+        return jpeg
+    try:
+        with Image.open(io.BytesIO(jpeg)) as im:
+            if max(im.size) <= max_px:
+                return jpeg
+            im = im.convert("RGB")
+            im.thumbnail((max_px, max_px), Image.BILINEAR)
+            out = io.BytesIO()
+            im.save(out, "JPEG", quality=JPEG_QUALITY)
+            return out.getvalue()
+    except Exception:  # not a JPEG Pillow can read: let Gemini say so
+        return jpeg
 
 QUESTION = (
     "This is a frame from the camera of a small robot dog, about 20 cm above the floor, through a"
@@ -86,7 +116,7 @@ class GeminiVision:
     def _ask(self, jpeg: bytes) -> dict:
         body = {
             "contents": [{"role": "user", "parts": [
-                {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(jpeg).decode()}},
+                {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(shrink(jpeg)).decode()}},
                 {"text": QUESTION},
             ]}],
             "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "responseSchema": SCHEMA},

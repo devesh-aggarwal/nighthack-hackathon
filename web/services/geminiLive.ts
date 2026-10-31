@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, StartSensitivity, EndSensitivity } from '@google/genai';
 import { createPcmBlob, decodeAudioData, blobToBase64 } from './audioUtils';
 import { AppConfig, LogEntry, RobotEvent, ScreenDisplay } from '../types';
 import RobotBridge from './robotBridge';
@@ -160,6 +160,18 @@ export class GeminiLiveService {
       systemInstruction: systemInstruction,
       tools: [{ functionDeclarations }],
       contextWindowCompression: { slidingWindow: {} },
+      // When a person has finished talking. The default (END_SENSITIVITY_LOW) waits for a long
+      // quiet, which a noisy room never gives it, so Pupper answered seconds late at a venue.
+      // HIGH ends the turn after about half a second of no speech; LOW start sensitivity so
+      // background chatter doesn't start turns. (Accepted by gemini-3.1-flash-live-preview.)
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+          endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+          prefixPaddingMs: 200,
+          silenceDurationMs: 600,
+        },
+      },
     };
     if (isAudioOutput && config.captions) {
       // the transcript of Pupper's own speech, shown on the face for people who can't hear it.
@@ -275,56 +287,67 @@ export class GeminiLiveService {
     this.inputScriptProcessor.connect(ctx.destination);
   }
 
+  // One frame a second goes to Gemini over the same WebSocket as the voice, so a big frame
+  // delays the words behind it. Pupper's camera serves 1400 x 1050 JPEGs (on the order of 100-300 KB;
+  // see robot/camera_setup.sh): sent as they came, they filled a venue's few-Mbit uplink and Gemini
+  // answered seconds late. Both camera sources are scaled to LIVE_FRAME_PX on the long side first.
+  private static readonly LIVE_FRAME_PX = 512;
+  private static readonly LIVE_FRAME_JPEG_QUALITY = 0.6;
+  private static readonly LIVE_FRAME_EVERY_MS = 1000;
+
+  /** A small JPEG of an image or video frame for Gemini Live, or null if there is no picture yet. */
+  private static async frameForGemini(
+    picture: HTMLVideoElement | ImageBitmap, width: number, height: number, canvas: HTMLCanvasElement,
+  ): Promise<Blob | null> {
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !width || !height) return null;
+    const scale = Math.min(1, GeminiLiveService.LIVE_FRAME_PX / Math.max(width, height));
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    ctx.drawImage(picture, 0, 0, canvas.width, canvas.height);
+    return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', GeminiLiveService.LIVE_FRAME_JPEG_QUALITY));
+  }
+
   private setupVideoInput(videoEl: HTMLVideoElement, source: 'browser' | 'server') {
     if (this.videoInterval) clearInterval(this.videoInterval);
-    
+    const canvas = document.createElement('canvas');
+
+    const send = async (blob: Blob | null) => {
+      if (!blob || !this.connected) return;
+      const base64 = await blobToBase64(blob);
+      this.sessionPromise?.then(session => {
+        if (!this.connected) return;
+        try {
+          session.sendRealtimeInput({ video: { mimeType: 'image/jpeg', data: base64 } });
+        } catch (err) {}
+      });
+    };
+
     if (source === 'browser') {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        
-        this.videoInterval = window.setInterval(async () => {
-          if (!this.connected || !this.sessionPromise || !ctx || !videoEl.videoWidth) return;
-          
-          canvas.width = videoEl.videoWidth * 0.5;
-          canvas.height = videoEl.videoHeight * 0.5;
-          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-          
-          canvas.toBlob(async (blob) => {
-            if (!blob || !this.connected) return;
-            const base64 = await blobToBase64(blob);
-            this.sessionPromise?.then(session => {
-                if (!this.connected) return;
-                try {
-                    session.sendRealtimeInput({ 
-                      video: { 
-                        mimeType: 'image/jpeg', 
-                        data: base64 
-                      }
-                    })
-                } catch(err) {}
-            });
-          }, 'image/jpeg', 0.6);
-        }, 1000);
+      this.videoInterval = window.setInterval(async () => {
+        if (!this.connected || !this.sessionPromise || !videoEl.videoWidth) return;
+        send(await GeminiLiveService.frameForGemini(videoEl, videoEl.videoWidth, videoEl.videoHeight, canvas));
+      }, GeminiLiveService.LIVE_FRAME_EVERY_MS);
     } else {
-        // Server source
-        this.videoInterval = window.setInterval(async () => {
-             if (!this.connected || !this.sessionPromise) return;
-             const blob = await this.robotBridge.getCameraImage();
-             if (blob && this.connected) {
-                 const base64 = await blobToBase64(blob);
-                 this.sessionPromise?.then(session => {
-                    if (!this.connected) return;
-                    try {
-                        session.sendRealtimeInput({ 
-                          video: { 
-                            mimeType: 'image/jpeg', 
-                            data: base64 
-                          }
-                        })
-                    } catch(err) {}
-                });
-             }
-        }, 1000); // 2Hz
+      // Server source: the robot's own camera (GET /camera/image), the frame the eyes service sees.
+      let busy = false;  // a slow fetch must not pile up frames behind it
+      this.videoInterval = window.setInterval(async () => {
+        if (!this.connected || !this.sessionPromise || busy) return;
+        busy = true;
+        try {
+          const blob = await this.robotBridge.getCameraImage();
+          if (!blob || !this.connected) return;
+          const bitmap = await createImageBitmap(blob);
+          try {
+            send(await GeminiLiveService.frameForGemini(bitmap, bitmap.width, bitmap.height, canvas));
+          } finally {
+            bitmap.close();
+          }
+        } catch (err) {
+        } finally {
+          busy = false;
+        }
+      }, GeminiLiveService.LIVE_FRAME_EVERY_MS);
     }
   }
 
