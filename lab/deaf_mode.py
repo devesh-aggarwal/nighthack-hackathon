@@ -9,6 +9,12 @@ it was, in big letters, for as long as the sound goes on (hearing_tick: YAMNet's
 doesn't talk about them. Shouts and bangs are not urgent: the meter's loudness alone gave too
 many false alarms.
 
+If Pupper is standing still in locomotion mode when the alert comes, it also turns one slow full
+circle (SPIN_DEG_S for SPIN_S, through the queue like any turn), and the screen stays red until
+the circle is done, so it can be seen from all around the room. Lying down, in a trick, following
+or already moving, it doesn't move: it never stands up on its own. stop cancels the spin like any
+motion.
+
 The screen gets it as *events*: the web app polls GET /events?after=<id> four times a second,
 paints a "sound" event's ``display`` and clears the screen on "sound_end", even while Pupper sleeps.
 
@@ -18,11 +24,13 @@ streamed in with ./run_pupper.sh --laptop) it refuses and says why.
 
 from __future__ import annotations
 
+import asyncio
 import collections
 import logging
 import time
 
-from robot_api import Result, Robot
+from part2_walk import walk
+from robot_api import LOCOMOTION, Result, Robot
 from tool_registry import Param, tool
 
 log = logging.getLogger("events")
@@ -40,11 +48,15 @@ STILL_SCORE = 0.15  # YAMNet still scores the sound this high: it is still going
 MIN_SHOW_S = 1.0  # a short sound (a knock, a crash) stays up this long, to be read
 MAX_SHOW_S = 10.0  # with no word from YAMNet (not installed), the screen clears after this
 MOTION_QUIET_S = 1.5  # after a motion job: the motors are loud, and so is a landing
+SPIN_S = MAX_SHOW_S  # the alert spin: one full circle in this long, the screen red throughout
+SPIN_DEG_S = 360.0 / SPIN_S  # 36 deg/s, a slow turn
 
 DEAF_MODE = False  # never on at start
 OWN_SOUND_UNTIL = 0.0  # time.time() until which what the mic hears is Pupper's own beacon (lab/blind_mode.py)
 _showing = ""  # the class on the screen now ("" = nothing)
 _last_heard = 0.0  # when that sound was last heard
+_spin: asyncio.Task | None = None
+_spin_until = 0.0  # time.time() until which the alert spin keeps the screen red
 
 
 # ============================================================ what the robot does: events and the screen
@@ -132,7 +144,27 @@ def hearing_detected(robot: Robot, event: dict) -> Result:
            else f"{event.get('score', 0):.0f} dB above the room")                                  # the meter
     show_alert(label, f"{time.strftime('%H:%M:%S')}  {what}")
     log.info("urgent sound: %s (%s)", label, how)
-    return Result(True, f"{label}: shown on the screen ({how})")
+    spun = " and turning a full circle so it can be seen" if spin_to_show(robot) else ""
+    return Result(True, f"{label}: shown on the screen{spun} ({how})")
+
+
+def spin_to_show(robot: Robot) -> bool:
+    """Turn one slow full circle, if Pupper stands still in locomotion mode. True if queued."""
+    global _spin, _spin_until
+    if robot.fallen or robot.state_after_queue != LOCOMOTION or (_spin is not None and not _spin.done()):
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # no event loop (called outside the server): show only
+        return False
+
+    async def spin() -> None:
+        res = await walk(robot, 0.0, 0.0, SPIN_DEG_S, SPIN_S)
+        (log.info if res.ok else log.warning)("alert spin: %s", res.message)
+
+    _spin = loop.create_task(spin())
+    _spin_until = time.time() + SPIN_S
+    return True
 
 
 def hearing_tick(scores: dict) -> None:
@@ -146,7 +178,7 @@ def hearing_tick(scores: dict) -> None:
     now = time.time()
     if scores.get(_showing, 0.0) >= STILL_SCORE:
         _last_heard = now
-    elif now - _last_heard >= MIN_SHOW_S:
+    elif now - _last_heard >= MIN_SHOW_S and now >= _spin_until:  # a spin keeps it up all the way round
         _showing = ""
         end_alert()
 

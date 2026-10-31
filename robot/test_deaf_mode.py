@@ -11,6 +11,7 @@ hearing/listener.py.
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
 import time
 from pathlib import Path
@@ -55,6 +56,8 @@ async def deaf_tests() -> None:
     deaf_mode.DEAF_MODE = False
     deaf_mode.clear_display()
     rig.ts.hearing = FakeHearing()
+    await call(rig, "lie_down")  # lying down Pupper only shows sounds (spin_tests: standing, it turns too)
+    rig.ts.busy_until = rig.ts.now() - 10.0  # long after lying down: not its own motors
 
     res = heard(rig, "doorbell", "Doorbell")
     check("deaf mode is off at start: a doorbell is ignored", "off" in res.message and deaf_mode.display_state() is None,
@@ -124,8 +127,54 @@ async def deaf_tests() -> None:
     rig.close()
 
 
+async def spin_tests() -> None:
+    print("Deaf mode: a full slow circle so the red screen can be seen")
+    rig = Rig()  # standing in locomotion mode
+    deaf_mode._spin = None  # a spin task from deaf_tests' event loop is gone
+    deaf_mode._spin_until = 0.0
+    deaf_mode.DEAF_MODE = True
+    deaf_mode.clear_display()
+    await rig.settle()
+    rig.robot.published.clear()
+    res = heard(rig, "siren", "Siren")
+    again = heard(rig, "doorbell", "Doorbell")  # before the spin has started
+    await deaf_mode._spin
+    await rig.settle()
+    turns = [(t, m) for t, m in rig.robot.twists() if abs(m.angular.z) > 1e-6]
+    rates = sorted({round(math.degrees(m.angular.z), 1) for _, m in turns})
+    spun = (turns[-1][0] - turns[0][0]) * math.degrees(turns[0][1].angular.z) if turns else 0.0
+    check("standing, an urgent sound also turns Pupper left, slowly", "turning a full circle" in res.message
+          and rates == [deaf_mode.SPIN_DEG_S], f"{res.message}; turn rates sent: {rates} deg/s")
+    check("... one full circle", abs(spun - 360) < 10 and abs(deaf_mode.SPIN_DEG_S * deaf_mode.SPIN_S - 360) < 1e-9,
+          f"turned about {spun:.0f} deg")
+    check("... and stands still after", not rig.robot.twists()[-1][1].angular.z)
+    check("a second sound before the spin ends doesn't queue another", "turning" not in again.message
+          and spun < 370, again.message)
+
+    deaf_mode._showing, deaf_mode._last_heard = "siren", time.time() - 5.0  # the siren stopped 5 s ago
+    deaf_mode._spin_until = time.time() + 3.0
+    deaf_mode.hearing_tick({})
+    check("the screen stays red until the circle is done, even after the sound stops",
+          deaf_mode.display_state() is not None and deaf_mode._showing == "siren", str(deaf_mode.display_state()))
+    deaf_mode._spin_until = time.time() - 0.1
+    deaf_mode.hearing_tick({})
+    check("... and clears once it is", deaf_mode.display_state() is None)
+    deaf_mode._spin_until = 0.0
+
+    await call(rig, "lie_down")
+    rig.ts.busy_until = rig.ts.now() - 10.0  # long after lying down: not its own motors
+    rig.robot.published.clear()
+    res = heard(rig, "siren", "Siren")
+    await rig.settle()
+    check("lying down, the screen goes red but Pupper doesn't move", "turning" not in res.message
+          and not rig.robot.twists() and deaf_mode.display_state()["text"] == "SIREN", res.message)
+    deaf_mode.DEAF_MODE = False
+    rig.close()
+
+
 if __name__ == "__main__":
     asyncio.run(deaf_tests())
+    asyncio.run(spin_tests())
     if tt.FAIL:
         print(f"{tt.FAIL} check(s) failed, {tt.PASS} passed.")
         sys.exit(1)
