@@ -7,6 +7,7 @@ import Settings from './components/Settings';
 import { GeminiLiveService } from './services/geminiLive';
 import RobotBridge from './services/robotBridge';
 import { RobotEvents } from './services/robotEvents';
+import { startSiren, stopSiren } from './services/siren';
 import { DEMO, runDemo } from './services/demo';
 
 // Icons
@@ -151,10 +152,21 @@ const App: React.FC = () => {
   useEffect(() => {
     const bridge = bridgeRef.current;
     bridge.getDisplay().then(d => { if (d) showDisplay(d); });
-    const events = new RobotEvents(bridge, e => { if (e.display) showDisplay(e.display); });
-    events.start();
+    // A "sound" or "emergency" event paints the alert; "sound_end" / "emergency_end" clears it.
+    const events = new RobotEvents(bridge, e => {
+      if (e.display) showDisplay(e.display);
+      else if (e.kind === 'sound_end' || e.kind === 'emergency_end') showDisplay(null);
+    });
+    events.start(250);  // 4 times a second, so the alert comes and goes with the sound
     return () => events.stop();
   }, [config.robotApiUrl, showDisplay]);
+
+  // Collapse watch: the siren sounds for as long as the screen asks for it.
+  useEffect(() => {
+    if (display?.siren) startSiren();
+    else stopSiren();
+  }, [display]);
+  useEffect(() => stopSiren, []);
 
   // what Pupper hears right now (only while sound alerts are on), for a corner of the face.
   const [hearing, setHearing] = useState<string | null>(null);

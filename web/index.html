@@ -30,6 +30,9 @@
       @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
       @keyframes alert-flash { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
       .alert-in { animation: fade-in 200ms ease-out both, alert-flash 0.8s ease-in-out 3; }
+      /* collapse watch: red on and off, once a second (well under the 3 Hz seizure threshold) */
+      @keyframes alert-strobe-bg { 0%, 49% { background: #ef4444; } 50%, 100% { background: #450a0a; } }
+      .alert-strobe { animation: fade-in 200ms ease-out both, alert-strobe-bg 1s steps(1) infinite; }
       @media (prefers-reduced-motion: reduce) { .alert-in { animation: none; } }
     </style>
   <script type="importmap">

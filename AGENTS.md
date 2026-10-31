@@ -5,7 +5,8 @@ This repository is Gemini Pupper, a finished copy of Stanford CS 123 Lab 6
 **deaf mode**. When a person says they are deaf or hard of
 hearing, Pupper keeps listening, and an urgent sound (siren, alarm, doorbell,
 knocking, crash, shouting, a baby crying) turns its whole screen red with what
-it was. `README.md` says what the robot does and how to run it; read it first.
+it was. And **blind mode**: for someone who is blind or has low vision, `find`
+looks for a thing, walks up to it and beeps beside it (`beacon`). `README.md` says what the robot does and how to run it; read it first.
 Keep it that small: don't add features nobody asked for. Explain what you
 change and why, and keep changes small enough to review.
 
@@ -45,6 +46,9 @@ drives the ROS 2 controllers. Trick policies are trained in pupper-mjlab
 | `lab/prompt.md`, `basics.py`, `part2_walk.py` ... `part5_interactive_action.py` | the Lab 6 tools: walking (`move`, `turn`, `arc`), `follow`, tricks, `interactive_action`. The `TODO n` cards in these files are the lab's numbering; every TODO is written, and `python3 lab/test.py todo3` tests one |
 | `lab/deaf_mode.py` | deaf mode: the `deaf_mode` tool, the urgent-sound list, the event bus and the red alert screen |
 | `hearing/` | the sound detector deaf mode uses: the meter, the detector and YAMNet |
+| `lab/blind_mode.py`, `lab/vision.py`, `lab/fisheye_geom.py`, `lab/debug_view.py` | blind mode: the `find` and `beacon` tools, the senses and the obstacle rule `find` walks by, Lab 5's lens model, and what the debug page (`GET /debug`) shows |
+| `vision/eyes.py` | blind mode's eyes service: the object detector, depth and Gemma, posting to the robot server |
+| `lab/collapse_watch.py`, `vision/` | collapse watch (on by default): someone collapsed in view -> walk up, "Are you okay?", siren and flashing screen, then a *claimed* (not placed) 911 call |
 | `robot/` | the Robot API, the tool registry, the robot server, the tests, the launch files and scripts |
 | `web/` | the web app (TypeScript): the face, the debug view and the Gemini Live client |
 | `tricks/` | one folder per trick (`policy.json` + `trick.yaml`; `robot/tricks.py` lists the fields) |
@@ -92,8 +96,10 @@ safety rule 1: only with an OK from the person at the robot.
 
 - `python3 lab/test.py`: every check, on a fake robot. Run it after every
   change in `lab/` or `robot/`. It checks what the tools do, not how they are
-  written. Groups: `todo1` ... `todo11`, `part1` ... `part7`, `robot`, and
-  `deaf` (deaf mode, `robot/test_deaf_mode.py`).
+  written. Groups: `todo1` ... `todo11`, `part1` ... `part7`, `robot`,
+  `deaf` (deaf mode, `robot/test_deaf_mode.py`), `blind` (blind mode,
+  `robot/test_blind_mode.py`; one of its groups: `python3 lab/test.py blind find`) and
+  `collapse` (collapse watch, `robot/test_collapse.py`).
 - `python3 hearing/test_signal.py` (needs numpy and scipy): the sound detector.
 - `python3 lab/chat.py`: talk to Gemini in text with the prompt and tools, on
   the fake robot (nothing moves). It shows each tool call, the reply Gemini
@@ -117,8 +123,10 @@ safety rule 1: only with an OK from the person at the robot.
 - Motion goes through the queue (`robot.queue`): check now, queue a job, and
   the job checks again, acts and reports. Wait with `await robot.sleep(...)`,
   never `time.sleep`.
-- Things the robot notices on its own (an urgent sound) go on the event bus
-  (`lab/deaf_mode.py`), and the web app paints them on the screen.
+- Things the robot notices on its own (an urgent sound, a search result) go on
+  the event bus (`lab/deaf_mode.py`), and the web app paints them on the screen.
+  Blind mode's events also carry a line for Gemini (`for_gemini`), so Pupper
+  says how a search went.
 - Units: metres, seconds, degrees. Directions use the robot's convention:
   +y is left, and a positive turn is to the left.
 - After changing a `.py` file in `lab/`, restart the server

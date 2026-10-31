@@ -88,7 +88,19 @@ def make_hearing(robot: Robot):
     except Exception as e:  # numpy/scipy/sounddevice missing: no deaf mode
         log.warning("hearing unavailable (%s); deaf mode can't start", e)
         return None
-    return Hearing(on_event=lambda ev: behaviors.hearing_detected(robot, ev))
+    return Hearing(on_event=lambda ev: behaviors.hearing_detected(robot, ev),
+                   on_tick=lambda scores: behaviors.hearing_tick(scores))
+
+
+def make_vision():
+    """The camera check for collapse watch (vision/gemini_vision.py): needs the Gemini key."""
+    sys.path.insert(0, str(REPO / "vision"))
+    from gemini_vision import GeminiVision, api_key
+    key = api_key()
+    if key is None:
+        log.warning("no Gemini key (GEMINI_API_KEY or ~/.config/gemini-pupper/api_key): collapse watch is off")
+        return None
+    return GeminiVision(key)
 
 
 @asynccontextmanager
@@ -96,7 +108,8 @@ async def lifespan(app: FastAPI):
     global tools
     tools = Robot()
     tools.hearing = make_hearing(tools)
-    tasks = [asyncio.create_task(detections.run())]
+    tools.vision = make_vision()
+    tasks = [asyncio.create_task(detections.run()), asyncio.create_task(behaviors.watch_for_collapse(tools))]
     yield
     for task in tasks:
         task.cancel()
@@ -350,6 +363,91 @@ def hearing_now():
     """What Pupper hears right now (YAMNet's top label, or null for silence), for the screen's corner."""
     h = getattr(T(), "hearing", None)
     return h.now() if h is not None else {"label": None, "confidence": 0.0}
+
+
+# ------------------------------------------------------------------ blind mode: what the eyes see (lab/vision.py)
+class DetectionsIn(BaseModel):
+    detections: list[dict]  # [{label, score, box: [x, y, w, h] as fractions of the frame}]
+    width: int = 0
+    height: int = 0
+    frame_age_s: float = 0.0  # how long ago their frame was taken
+
+
+class FreeSpaceIn(BaseModel):
+    strips: list[dict]  # [{name, nearness | closest_m | near_frac}] left to right (lab/vision.py)
+    mode: str = "relative"
+    eyes_url: str = ""  # where the eyes service answers /exists (so find can ask it)
+    circle: list | None = None  # the fisheye's disc [cx, cy, r, r_of_height] as fractions of the frame
+    frame_age_s: float = 0.0  # how old the frame behind this summary is (a slow poster says so)
+    source: str = ""  # which eyes service (hostname): a slow one stands down for a fast one
+
+
+class TargetIn(BaseModel):
+    name: str
+    box: list | None = None  # [x, y, w, h] as fractions of the frame, or null: looked, not there
+    score: float = 1.0
+    source: str = "eyes"
+    bottom_known: bool = True  # false: a model that only pointed (a bearing, no range)
+    frame_age_s: float = 0.0  # how long ago its frame was taken: find's walk-up takes off the turning done since
+
+
+class TuningIn(BaseModel):
+    stop_bottom: float
+
+
+@app.post("/vision/detections")
+def vision_detections(req: DetectionsIn):
+    """The eyes service's object detector: what is in the camera frame."""
+    n = behaviors.update_detections(req.detections, req.width, req.height, req.frame_age_s)
+    return {"success": True, "message": f"{n} detections"}
+
+
+@app.post("/vision/freespace")
+def vision_freespace(req: FreeSpaceIn):
+    """The eyes service's depth sense: where the nearest thing on the floor is in each strip of the view."""
+    n = behaviors.update_freespace(req.strips, req.mode, req.eyes_url, req.circle, req.frame_age_s, req.source)
+    return {"success": True, "message": f"{n} strips", "wanted": behaviors.WANTED["name"] or None,
+            "cam_height_m": behaviors.camera_height_m(T()), "attention": behaviors.attention_now(T()),
+            "others_posting": behaviors.others_fresh(req.source)}
+
+
+@app.get("/vision/wanted")
+def vision_wanted():
+    """What find is walking up to, for the eyes service to track (null: nothing)."""
+    return {"name": behaviors.WANTED["name"] or None, "since": behaviors.WANTED["since"]}
+
+
+@app.post("/vision/target")
+def vision_target(req: TargetIn):
+    """The eyes service's latest fix on the wanted thing (lab/blind_mode.py steers on it)."""
+    seen = behaviors.update_target(req.name, req.box, req.score, req.source, req.bottom_known, req.frame_age_s)
+    return {"success": True, "message": "box" if seen else "not seen", "wanted": behaviors.WANTED["name"] or None}
+
+
+@app.get("/vision")
+def vision(source: str = ""):
+    """Everything the eyes posted, plus what an eyes service called ``source`` should do now: run at
+    full rate (attention) or stand down (another service is posting)."""
+    return {"detections": behaviors.VISION, "freespace": behaviors.FREESPACE, "target": behaviors.TARGET,
+            "wanted": behaviors.WANTED, "attention": behaviors.attention_now(T()),
+            "others_posting": behaviors.others_fresh(source) if source else False}
+
+
+@app.get("/debug")
+def debug_page():
+    """What Pupper sees, with what find's obstacle rule and walk-up are working from drawn on it."""
+    return Response(content=(Path(__file__).resolve().parent / "debug.html").read_text(), media_type="text/html")
+
+
+@app.get("/debug/state")
+def debug_state():
+    return behaviors.debug_state(tools)
+
+
+@app.post("/debug/tuning")
+def debug_tuning(req: TuningIn):
+    """Move the stop row (Lab 5's STOP_BOTTOM) until the server restarts. Moves nothing."""
+    return behaviors.set_stop_bottom(req.stop_bottom).as_dict()
 
 
 @app.get("/mirror")

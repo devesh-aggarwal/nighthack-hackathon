@@ -61,6 +61,9 @@ LAB_DIR = Path(__file__).resolve().parent.parent / "lab"
 LAB_MODULES = [
     "basics", "part2_walk", "part3_follow", "part4_tricks", "part5_interactive_action",
     "deaf_mode",  # urgent sounds on the screen for people who can't hear
+    "vision", "blind_mode",  # find a thing and beep beside it, for people who can't see
+    "debug_view",  # GET /debug: what blind mode's senses see (no tools)
+    "collapse_watch",  # someone collapses in view -> walk up, ask, alarm, "calling 911"
 ]
 
 

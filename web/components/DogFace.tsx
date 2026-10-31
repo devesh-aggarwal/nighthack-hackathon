@@ -532,10 +532,10 @@ const DogFace: React.FC<DogFaceProps> = ({ isListening, isSpeaking, audioLevel, 
         </div>
       )}
 
-      {/* a sound alert takes over the whole screen (urgent ones in red) */}
-      {display && display.kind === 'sound' && (
+      {/* a sound alert, or a collapse emergency (flashing), takes over the whole screen */}
+      {display && (display.kind === 'sound' || display.kind === 'emergency') && (
         <div key={`${display.text}-${display.detail}`}
-             className="alert-in absolute inset-0 z-40 flex flex-col items-center justify-center text-center px-6"
+             className={`${display.flash ? 'alert-strobe' : 'alert-in'} absolute inset-0 z-40 flex flex-col items-center justify-center text-center px-6`}
              style={{ background: display.color, color: textColorFor(display.color) }}>
           <div className="font-black uppercase tracking-wide leading-none break-words max-w-full"
                style={{ fontSize: `${Math.max(40, (display.text.length > 14 ? 72 : 110) * globalScale)}px` }}>

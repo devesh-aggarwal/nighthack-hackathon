@@ -45,10 +45,12 @@ export interface ScreenDisplay {
   detail: string;
   color: string;
   seconds: number;
-  kind?: string; // "sound" takes over the whole screen
+  kind?: string; // "sound" or "emergency" takes over the whole screen
+  flash?: boolean; // emergency: the red flashes on and off
+  siren?: boolean; // emergency: the app sounds its siren (services/siren.ts)
 }
 
-/** Something that happened on the robot (GET /events): a sound. */
+/** Something that happened on the robot (GET /events): a sound, or someone collapsed. */
 export interface RobotEvent {
   id: number;
   time: number;
