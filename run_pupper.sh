@@ -66,6 +66,14 @@ if [ ! -d /opt/ros/jazzy ]; then
   exec "$HERE/tools/pup" start "$@"
 fi
 LOG=/tmp/gemini-pupper/server.log
+# --laptop here, on the Pupper: the laptop's mic can only be sent from the laptop (ffmpeg there, above),
+# so it has to have been started there. A terminal on the Pupper (VS Code's Remote-SSH too) can't.
+if [ $LAPTOP = 1 ] && ! XDG_RUNTIME_DIR=/run/user/$(id -u) pactl list short sources 2>/dev/null | grep -q laptop_mic; then
+  echo "--laptop has to be run on the laptop, not on the Pupper: only the laptop can send its own mic."
+  echo "This terminal is on the Pupper ($(hostname)). Open a terminal on your laptop (not VS Code's Remote-SSH"
+  echo "one), cd to your checkout of this repo there, and run:  ./run_pupper.sh --laptop"
+  exit 1
+fi
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export PATH=$HOME/.local/node/bin:$PATH   # robot/setup.sh installs Node there
 
@@ -96,11 +104,16 @@ if ! python3 -c "import fastapi, uvicorn, psutil, pydantic, websockets, yaml" 2>
   python3 -m pip install --user --break-system-packages -q fastapi uvicorn psutil pydantic websockets pyyaml || exit 1
 fi
 
+# --- 2b. blind mode's eyes service (vision/eyes.py): the depth model and the object detector
+if ! python3 -c "import onnxruntime, mediapipe, numpy, PIL" 2>/dev/null; then
+  echo "installing the eyes service's Python packages (blind mode: depth + detector)..."
+  python3 -m pip install --user --break-system-packages -q -r "$HERE/vision/requirements.txt" mediapipe \
+    || echo "WARNING: eyes packages failed to install; find will only turn, not walk"
+fi
+
 # --- 3. sound
 if [ $LAPTOP = 1 ]; then
-  if pactl list short sources 2>/dev/null | grep -q laptop_mic; then echo "mic: the laptop's (streamed over SSH)"
-  else echo "WARNING: --laptop, but no laptop mic is streaming; run ./run_pupper.sh --laptop from the laptop"
-  fi
+  echo "mic: the laptop's (streamed over SSH)"
 elif arecord -l 2>/dev/null | grep -q card; then
   echo "mic: $(arecord -l | grep card | head -1 | sed -E 's/.*\[([^]]+)\].*\[.*/\1/')"
 else
@@ -116,9 +129,11 @@ cat <<'EOF'
 Talk to Pupper from about an arm's length. Try, in order:
   "Stand up."  ->  "Sit." (wait 10 s)  ->  "Shake your left paw."  ->  "Stand up."
   "I'm deaf."  ->  knock on a table or play a doorbell sound (the screen turns red: KNOCKING, DOORBELL)
+  "Beep so I can find you."  ->  "Got it."   (blind mode's beacon; nothing moves)
+  A cup on the floor 1 m away, clear floor:  "Find my cup."  (it walks up to it and beeps; http://localhost:8000/debug shows what it sees)
 Say "stop" (or use the gamepad's right stick) to stop right away. Ctrl+C here shuts everything down.
 
 --- live tool calls and events ---
 EOF
-tail -n 0 -F "$LOG" 2>/dev/null | grep --line-buffered -E "server INFO tool |robot_api (INFO|WARNING|ERROR)|(events|hearing) (INFO|WARNING|ERROR)" \
-  | sed -u -E 's/^[0-9-]+ ([0-9:]+),[0-9]+ (server|robot_api|events|hearing) (INFO|WARNING|ERROR) /\1  /'
+tail -n 0 -F "$LOG" 2>/dev/null | grep --line-buffered -E "server INFO tool |robot_api (INFO|WARNING|ERROR)|(events|hearing|vision) (INFO|WARNING|ERROR)" \
+  | sed -u -E 's/^[0-9-]+ ([0-9:]+),[0-9]+ (server|robot_api|events|hearing|vision) (INFO|WARNING|ERROR) /\1  /'

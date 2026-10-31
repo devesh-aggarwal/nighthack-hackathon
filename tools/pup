@@ -82,7 +82,7 @@ case "$cmd" in
   sync)
     rsync -az --delete -e "ssh $(quote_args "${SSH_OPTS[@]}")" \
       --exclude .git --exclude '.venv*' --exclude __pycache__ --exclude .DS_Store \
-      --exclude node_modules --exclude 'web/dist' --exclude .env.local \
+      --exclude node_modules --exclude 'web/dist' --exclude .env.local --exclude 'vision/models' \
       "$REPO_DIR/" "$HOST:~/$REMOTE_REPO/"
     echo "pup: synced to $HOST:~/$REMOTE_REPO" ;;
   start) "$0" sync

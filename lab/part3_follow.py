@@ -48,11 +48,14 @@ async def prepare_to_move(robot: Robot) -> str:
     Test:                python3 lab/test.py todo5
     """
     # ========== TODO 5: YOUR CODE HERE ==========
+    from blind_mode import stop_beacon  # here: blind mode's beacon also runs on its own, and a new motion ends it
+
+    beeped = "Stopped beeping first." if stop_beacon() else ""
     if not robot.following:
-        return ""
+        return beeped
     await robot.stop_following()
     robot.send_speed(0, 0, 0)
-    return "Stopped following the person first."
+    return f"{beeped} Stopped following the person first.".strip()
     # ====================================
 
 

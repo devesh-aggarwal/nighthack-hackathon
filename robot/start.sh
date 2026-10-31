@@ -40,6 +40,23 @@ setsid nohup bash -c "$ROS; cd $HERE && exec python3 -u $HERE/server.py" > $LOG/
 for i in $(seq 1 30); do curl -s -o /dev/null localhost:8000/health && break; sleep 1; done
 curl -s -o /dev/null localhost:8000/health || { echo "robot server did not start; see $LOG/server.log"; exit 1; }
 
+# Blind mode's eyes service on the Pi itself: the object detector and the depth sense (vision/eyes.py).
+# The Pi runs hot with the stack up, so this is a slow fallback (about 1 Hz); a laptop running
+# vision/eyes.py (README, "Blind mode") is about 5 Hz, and its posts take over. Without any eyes find
+# only turns. Gemma (for things the detector can't name) goes through Google's API with the Gemini
+# key; PUPPER_EYES_GEMMA=off for detector and depth only. PUPPER_EYES=off skips this. Log: $LOG/eyes.log.
+pkill -f "[v]ision/eyes.py" 2>/dev/null
+GEMMA="--no-gemma"; [ "${PUPPER_EYES_GEMMA:-api}" = "api" ] && [ -s "$KEY_FILE" ] && GEMMA="--gemma-api --gemma-api-key-file $KEY_FILE"
+if [ "${PUPPER_EYES:-on}" = "on" ] && python3 -c "import onnxruntime, numpy, PIL" 2>/dev/null; then
+  setsid nohup nice -n 10 python3 -u $REPO/vision/eyes.py $GEMMA --hz 1 --depth-size 224 --fetch-depth-model --fetch-detector-model \
+    > $LOG/eyes.log 2>&1 < /dev/null &
+  for i in $(seq 1 20); do curl -s -o /dev/null localhost:8100/health && break; sleep 1; done
+  curl -s -o /dev/null localhost:8100/health && echo "      eyes: detector + depth on the Pi (log $LOG/eyes.log)" \
+    || echo "      eyes: not up yet; see $LOG/eyes.log"
+else
+  echo "      eyes: python3 -m pip install -r $REPO/vision/requirements.txt mediapipe  (blind mode can't see until then)"
+fi
+
 if [ $KIOSK = 0 ]; then
   echo "[3/3] ready. From a laptop:  ssh -N -L 8000:localhost:8000 pi@<pupper>  then open http://localhost:8000"
   exit 0

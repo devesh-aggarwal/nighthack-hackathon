@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pupper debug</title>
+<style>
+  :root { --bg: #111; --panel: #1b1b1b; --text: #eee; --dim: #999; --red: #ef4444; --green: #22c55e;
+          --orange: #f97316; --cyan: #22d3ee; --magenta: #e879f9; --yellow: #facc15; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .ages { color: var(--dim); }
+  button, input { font: inherit; }
+  button { background: #333; color: var(--text); border: 1px solid #555; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  canvas { width: 100%; height: auto; background: #000; border-radius: 8px; display: block; }
+  #verdict { padding: 12px 14px; border-radius: 8px; font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+  #verdict.clear { background: #14532d; } #verdict.blocked { background: #7f1d1d; } #verdict.blind { background: #44403c; }
+  #verdict small { display: block; font-weight: 400; font-size: 13px; margin-top: 4px; }
+  section { background: var(--panel); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin: 0 0 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 3px 4px; border-bottom: 1px solid #2a2a2a; }
+  th { color: var(--dim); font-weight: 500; }
+  .bad { color: var(--red); font-weight: 600; } .warn { color: var(--orange); } .ok { color: var(--green); } .dim { color: var(--dim); }
+  .legend span { display: inline-block; margin-right: 12px; }
+  .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  #tuneMsg { color: var(--dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pupper debug: what it sees</h1>
+  <button id="pause">Pause</button>
+  <span class="ages" id="ages"></span>
+</header>
+<main>
+  <div>
+    <canvas id="view" width="1400" height="1050"></canvas>
+    <p class="legend dim">
+      <span><i style="background:var(--green)"></i>stop row (arrival)</span>
+      <span><i style="background:var(--red)"></i>block row (walk refused below it)</span>
+      <span><i style="background:var(--orange)"></i>slow-down row</span>
+      <span><i style="background:var(--yellow)"></i>edges of "ahead" (what a forward step can hit)</span>
+      <span><i style="background:var(--cyan)"></i>depth strip (red = blocks)</span>
+      <span><i style="background:var(--magenta)"></i>what find is walking up to</span>
+    </p>
+    <p class="dim">Boxes: red = blocks a forward walk, orange = close but off to the side, white = seen, grey dashed = ignored
+      (score too low, or mostly outside the lens circle: the detector seeing the black border). Thin white ellipse = the lens circle the eyes measured.</p>
+  </div>
+  <div>
+    <div id="verdict" class="blind">waiting for the robot...</div>
+    <section>
+      <h2>Detections</h2>
+      <table><thead><tr><th>what</th><th>score</th><th>in lens</th><th>bearing</th><th>base row</th><th>close?</th><th>ahead?</th><th>blocks?</th></tr></thead>
+        <tbody id="dets"></tbody></table>
+    </section>
+    <section>
+      <h2>Depth strips</h2>
+      <table><thead><tr><th>strip</th><th>base row</th><th>blocks?</th></tr></thead><tbody id="strips"></tbody></table>
+    </section>
+    <section>
+      <h2>find: walking up to</h2>
+      <div id="target" class="dim">nothing wanted</div>
+    </section>
+    <section>
+      <h2>Tuning</h2>
+      <label>STOP_BOTTOM (arrival row, px of 572):
+        <input id="stopBottom" type="number" step="1" style="width:5em">
+      </label>
+      <button id="apply">Apply</button>
+      <button id="reset">Reset</button>
+      <div id="tuneMsg">Lower number = stops farther from the thing. Lasts until the server restarts.</div>
+    </section>
+  </div>
+</main>
+<script>
+const canvas = document.getElementById('view');
+const ctx = canvas.getContext('2d');
+let paused = false, frame = null, state = null, tuningLoaded = false;
+
+document.getElementById('pause').onclick = e => { paused = !paused; e.target.textContent = paused ? 'Resume' : 'Pause'; };
+
+async function tune(px) {
+  const r = await fetch('/debug/tuning', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ stop_bottom: Number(px) }) });
+  const j = await r.json().catch(() => ({ message: `error ${r.status}` }));
+  document.getElementById('tuneMsg').textContent = j.message || JSON.stringify(j);
+  tuningLoaded = false;
+}
+document.getElementById('apply').onclick = () => tune(document.getElementById('stopBottom').value);
+document.getElementById('reset').onclick = () => state && tune(state.tuning.stop_bottom_default);
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const yes = (v, bad) => v ? `<span class="${bad ? 'bad' : 'warn'}">yes</span>` : '<span class="dim">no</span>';
+const sign = n => (n > 0 ? '+' : '') + n;
+
+function polyline(pts, color, width, dash) {
+  if (!pts || pts.length < 2) return;
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash || []);
+  ctx.beginPath();
+  pts.forEach(([u, v], i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, u * canvas.width, v * canvas.height));
+  ctx.stroke(); ctx.restore();
+}
+
+function label(text, x, y, color) {
+  ctx.font = '28px system-ui, sans-serif';
+  const w = ctx.measureText(text).width;
+  ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(x, y - 30, w + 10, 34);
+  ctx.fillStyle = color; ctx.fillText(text, x + 5, y - 5);
+}
+
+function draw() {
+  if (frame) {
+    if (canvas.width !== frame.width) { canvas.width = frame.width; canvas.height = frame.height; }
+    ctx.drawImage(frame, 0, 0);
+  } else {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    label('no camera frame', 40, 80, '#eee');
+  }
+  if (!state) return;
+  const W = canvas.width, H = canvas.height, L = state.lines;
+  for (const edge of L.ahead) polyline(edge, '#facc15', 3, [6, 10]);
+  const c = state.circle;
+  if (c && !(c[0] === 0.5 && c[1] === 0.5 && c[2] === 0.5 && c[3] === 0.5)) {
+    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.ellipse(c[0] * W, c[1] * H, c[2] * W, c[3] * H, 0, 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
+  }
+  polyline(L.slow, '#f97316', 3, [8, 8]);
+  polyline(L.block, '#ef4444', 4, [16, 10]);
+  polyline(L.stop, '#22c55e', 5);
+  for (const st of state.strips) {
+    polyline(st.curve, st.blocked ? '#ef4444' : '#22d3ee', 12);
+    if (st.curve.length) { const [u, v] = st.curve[Math.floor(st.curve.length / 2)]; label(st.name, u * W - 40, v * H - 12, st.blocked ? '#ef4444' : '#22d3ee'); }
+  }
+  for (const d of state.detections) {
+    const [x, y, w, h] = d.box;
+    const color = !d.counted ? '#999' : d.blocks_forward ? '#ef4444' : d.close ? '#f97316' : '#ffffff';
+    ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 5; ctx.setLineDash(d.counted ? [] : [12, 10]);
+    ctx.strokeRect(x * W, y * H, w * W, h * H); ctx.restore();
+    label(`${d.label} ${d.score.toFixed(2)} ${sign(d.bearing)}°`, x * W, Math.max(34, y * H), color);
+  }
+  const t = state.target;
+  if (t && t.box && t.age_s !== null && t.age_s < 4) {
+    const [x, y, w, h] = t.box;
+    ctx.save(); ctx.strokeStyle = '#e879f9'; ctx.lineWidth = 6; ctx.strokeRect(x * W, y * H, w * W, h * H); ctx.restore();
+    label(`target: ${t.name} (${t.age_s}s old)`, x * W, y * H + h * H + 34, '#e879f9');
+  }
+}
+
+function render() {
+  const s = state, v = document.getElementById('verdict');
+  const blind = s.detections_age_s === null && s.depth_age_s === null;
+  if (s.verdict.forward) {
+    v.className = 'blocked';
+    v.innerHTML = `FORWARD: BLOCKED<small>${esc(s.verdict.forward)}</small><small>by ${s.verdict.by_detector ? 'the object detector' : 'the depth sense'}</small>`;
+  } else if (blind) {
+    v.className = 'blind'; v.innerHTML = 'FORWARD: no senses<small>no detections and no depth: nothing is posting (is the app or the eyes service running?)</small>';
+  } else {
+    v.className = 'clear'; v.innerHTML = 'FORWARD: CLEAR<small>neither the detector nor the depth sense sees anything close ahead</small>';
+  }
+  const age = a => a === null ? 'never' : `${a}s ago`;
+  document.getElementById('ages').textContent =
+    `detections ${age(s.detections_age_s)} · depth ${age(s.depth_age_s)}${s.depth_source ? ' (' + s.depth_source + ')' : ''} · stop row ${s.tuning.stop_bottom}`;
+  document.getElementById('dets').innerHTML = s.detections.length ? s.detections.map(d => `<tr class="${d.counted ? '' : 'dim'}">
+      <td>${esc(d.label)}${d.counted ? '' : `<br><small>ignored: ${esc(d.ignored_because)}</small>`}</td><td>${d.score.toFixed(2)}</td>
+      <td>${d.in_lens === null ? '?' : Math.round(d.in_lens * 100) + '%'}</td><td>${sign(d.bearing)}°</td>
+      <td>${d.nearness === null ? '?' : d.nearness} <span class="dim">${esc(d.how_close)}</span></td>
+      <td>${yes(d.close)}</td><td>${yes(d.ahead)}</td><td>${yes(d.blocks_forward, true)}</td></tr>`).join('')
+    : '<tr><td colspan="8" class="dim">nothing detected (or no fresh detections)</td></tr>';
+  document.getElementById('strips').innerHTML = s.strips.length ? s.strips.map(st => `<tr>
+      <td>${esc(st.name)}</td><td>${st.nearness ?? st.closest_m ?? st.near_frac ?? '?'}</td>
+      <td>${st.blocked ? `<span class="bad">${esc(st.blocked)}</span>` : '<span class="ok">clear</span>'}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="dim">no fresh depth (eyes service not posting)</td></tr>';
+  const t = s.target;
+  document.getElementById('target').innerHTML = s.wanted
+    ? `looking for <b>${esc(s.wanted)}</b>: ${t.box && t.age_s < 4 ? `box from ${esc(t.source)}, ${t.age_s}s old` : 'not seen yet'}`
+    : 'nothing wanted';
+  if (!tuningLoaded) {
+    const inp = document.getElementById('stopBottom');
+    inp.value = s.tuning.stop_bottom; inp.min = s.tuning.stop_bottom_min; inp.max = s.tuning.stop_bottom_max;
+    tuningLoaded = true;
+  }
+}
+
+async function tick() {
+  if (!paused) {
+    const [img, st] = await Promise.allSettled([
+      fetch('/camera/image', { cache: 'no-store' }).then(r => r.ok ? r.blob() : null).then(b => b && createImageBitmap(b)),
+      fetch('/debug/state', { cache: 'no-store' }).then(r => r.json()),
+    ]);
+    if (img.status === 'fulfilled' && img.value) frame = img.value;
+    if (st.status === 'fulfilled' && st.value && st.value.verdict) { state = st.value; render(); }
+    draw();
+  }
+  setTimeout(tick, 300);
+}
+tick();
+</script>
+</body>
+</html>

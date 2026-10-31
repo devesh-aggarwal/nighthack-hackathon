@@ -10,6 +10,7 @@ free_port() {  # stop whatever is serving port 8000 (an older robot server)
 }
 pkill -f "[r]obot/kiosk.py"; pkill -f "[g]emini-pupper-kiosk"; pkill -f "[r]obot/server.py"; free_port
 pkill -f "[r]obot/laptop_mic.sh"  # a laptop's mic streamed in (run_pupper.sh --laptop): put the real default mic back
+pkill -f "[v]ision/eyes.py"  # blind mode's eyes service on the Pi
 pkill -INT -f "[g]emini_pupper.launch.py"
 for i in $(seq 1 15); do pgrep -f "[r]os2_control_node" >/dev/null || break; sleep 1; done
 pkill -9 -f "[g]emini_pupper.launch.py"; pkill -9 -f "[/]opt/ros/jazzy/lib/"; pkill -9 -f "[/]home/pi/pupperv3-monorepo/ros2_ws/install/"
