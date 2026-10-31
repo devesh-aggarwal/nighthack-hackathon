@@ -1,7 +1,7 @@
 """Emergency contact: Pupper phones one person you chose, never 911.
 
-When someone asks Pupper to get help or to call their contact, Gemini calls call_contact. The
-robot server places a real phone call through Twilio: the contact's phone rings, and when they
+When someone asks Pupper to get help or to call their contact, Gemini calls call_contact; collapse
+watch (collapse_watch.py) also calls the contact itself when nobody answers. The robot server places a real phone call through Twilio: the contact's phone rings, and when they
 pick up a voice reads Pupper's message twice ("Pupper here. <reason>").
 
 Who to call lives on the robot, outside the repo (it holds a Twilio token):

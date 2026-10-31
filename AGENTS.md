@@ -48,7 +48,7 @@ drives the ROS 2 controllers. Trick policies are trained in pupper-mjlab
 | `hearing/` | the sound detector deaf mode uses: the meter, the detector and YAMNet |
 | `lab/blind_mode.py`, `lab/vision.py`, `lab/fisheye_geom.py`, `lab/debug_view.py` | blind mode: the `find` and `beacon` tools, the senses and the obstacle rule `find` walks by, Lab 5's lens model, and what the debug page (`GET /debug`) shows |
 | `vision/eyes.py` | blind mode's eyes service: the object detector, depth and Gemma, posting to the robot server |
-| `lab/collapse_watch.py`, `vision/` | collapse watch (on by default): someone collapsed in view -> walk up, "Are you okay?", siren and flashing screen, then a *claimed* (not placed) 911 call |
+| `lab/collapse_watch.py`, `vision/` | collapse watch (on by default): someone collapsed in view -> walk up, "Are you okay?", siren and flashing screen, then "calling 911" (only said, never placed) while it really phones the emergency contact (`lab/emergency.py`) |
 | `robot/` | the Robot API, the tool registry, the robot server, the tests, the launch files and scripts |
 | `web/` | the web app (TypeScript): the face, the debug view and the Gemini Live client |
 | `tricks/` | one folder per trick (`policy.json` + `trick.yaml`; `robot/tricks.py` lists the fields) |

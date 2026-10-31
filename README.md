@@ -49,11 +49,11 @@ By voice (or text, with `lab/chat.py`):
 - **Collapse watch** (`collapse_watch`, `emergency_response`), on from the start: if the camera
   sees someone collapsed on the floor, Pupper walks up to them, asks "Are you okay?", and sounds
   an alarm for 10 seconds while its screen flashes red. With no "I'm okay", it says it is calling
-  911 and their emergency contacts. **It only says so: no call is placed.** See
-  [Collapse watch](#collapse-watch).
+  911 and their emergency contacts, and phones the emergency contact. **911 itself is never
+  called: that part is only said.** See [Collapse watch](#collapse-watch).
 - **Call for help** (`call_contact`): "call for help", "call Sam": Pupper phones the one emergency
   contact set up on the robot (through Twilio) and a voice reads them what is happening. It can
-  never call 911. See [Calling an emergency contact](#calling-an-emergency-contact).
+  never call 911. Collapse watch places the same call by itself; asking is a handy way to test it. See [Calling an emergency contact](#calling-an-emergency-contact).
 
 ## What's where
 
@@ -370,7 +370,8 @@ alert on the robot, make sure there is a clear circle around Pupper and a hand n
 ## Calling an emergency contact
 
 `lab/emergency.py`: the `call_contact` tool. When someone asks Pupper to call for help or to call
-their contact, Gemini calls `call_contact(reason)`; the robot server asks
+their contact, Gemini calls `call_contact(reason)`, and collapse watch places the same call by
+itself when nobody answers (step 4 of [Collapse watch](#collapse-watch)); the robot server asks
 [Twilio](https://www.twilio.com/docs/voice/api/call-resource) to place a real phone call, and when
 the contact picks up a voice reads "Pupper here. <reason>" twice. The tool has no number
 parameter: it can only call the one contact in the file below, so Gemini can't dial 911 or anyone
@@ -527,10 +528,14 @@ stream on slow Wi-Fi; see [Slow Wi-Fi](#slow-wi-fi)).
    loud with the browser's own speech (`web/services/speak.ts`), so it asks even if Gemini isn't
    connected or stays quiet. Gemini is told it asked, and listens for the answer.
 3. **Alarm.** After 3 s, a two-tone siren (Web Audio, `web/services/siren.ts`) sounds for 10 s
-   while the screen keeps flashing.
+   while the screen keeps flashing. It is turned down to about the loudness of blind mode's beep,
+   for demos in a crowded room; `SIREN_GAIN` in that file sets it.
 4. **"Calling 911".** If nobody has said they are fine, the screen says CALLING 911 and Gemini
-   says it is calling 911 and their emergency contacts. **This is only a message: Pupper places
-   no call and contacts no one.** Don't rely on it for a real emergency.
+   says it is calling 911 and their emergency contacts. Pupper then phones the emergency contact
+   (the same call as `call_contact`, see [Calling an emergency contact](#calling-an-emergency-contact)):
+   they hear that someone collapsed next to Pupper and didn't answer (or asked for help). With no
+   contact set up, nobody is called. **911 itself is never called: that part is only said.**
+   Don't rely on it for a real emergency.
 
 "I'm okay" at any point (Gemini calls `emergency_response(okay=true)`) stops everything, clears the
 screen, and Pupper doesn't check on anyone for 5 minutes. "Help me" (`okay=false`) skips straight

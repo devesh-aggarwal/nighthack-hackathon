@@ -16,7 +16,8 @@ Pupper:
      speech, so it is asked even if Gemini stays quiet); Gemini is told it asked and listens,
   3. sounds its alarm for ALARM_S: the web app plays a siren while the screen keeps flashing,
   4. if nobody has said they are fine by then, says it is calling 911 and their emergency
-     contacts (the screen says CALLING 911). It only says so: no call is placed.
+     contacts (the screen says CALLING 911), and phones the emergency contact (emergency.py,
+     through Twilio). 911 itself is never called: that part is only said.
 
 "I'm okay" (Gemini calls emergency_response with okay=true) stops it at any point and clears the
 screen; "help me" (okay=false) goes straight to step 4. collapse_watch(enabled=false) turns the
@@ -30,6 +31,7 @@ import logging
 import math
 import time
 
+from emergency import call_contact  # phones the emergency contact (never 911)
 import vision  # blind mode's senses: the obstacle rule its own walks use
 from deaf_mode import DISPLAY, EVENTS, URGENT_COLOR, clear_display
 from part2_walk import check_move, walk
@@ -62,6 +64,8 @@ ASK = ("[Emergency, from your camera] Someone is lying on the floor and may have
        " to them and just asked them out loud: \"Are you okay?\" Don't ask again; listen. If they say they are"
        " fine, call emergency_response with okay true. If they ask for help or say they are hurt, call it with"
        " okay false. Your alarm will sound for 10 seconds; if nobody says they are fine, you call 911.")
+NO_ANSWER = "Someone collapsed on the floor next to me and didn't answer when I asked if they were okay. Please check on them."
+ASKED_FOR_HELP = "Someone collapsed on the floor next to me and asked for help. Please check on them."
 CALLING = ("[Emergency] Nobody said they are okay. Say out loud, in one short sentence: \"I'm calling 911 and"
            " your emergency contacts now.\"")
 
@@ -269,14 +273,17 @@ async def emergency(robot: Robot, seen: dict) -> None:
     _stage = "alarm"
     show_emergency("ARE YOU OKAY?", detail, ALARM_S, siren=True)
     await robot.sleep(ALARM_S)
-    await call_for_help(robot)
+    await call_for_help(robot, NO_ANSWER)
 
 
-async def call_for_help(robot: Robot) -> None:
-    """Say it is calling 911 and the emergency contacts (on the screen, and Gemini says it). No call is placed."""
+async def call_for_help(robot: Robot, reason: str) -> None:
+    """Say it is calling 911 and the emergency contacts (on the screen, and Gemini says it), and phone the
+    emergency contact with ``reason``. 911 itself is never called."""
     global _stage
     _stage = "calling"
     show_emergency("CALLING 911", "and your emergency contacts", CALLING_SHOW_S, siren=False, for_gemini=CALLING)
+    called = await call_contact(robot, reason)
+    EVENTS.emit("emergency_call", called.message)
     await robot.sleep(CALLING_SHOW_S)
     end_emergency("911 shown for its time", QUIET_AFTER_CALL_S, robot)
 
@@ -308,7 +315,7 @@ async def emergency_response(robot: Robot, okay: bool) -> Result:
     if _stage == "calling":
         return Result(True, "already calling 911 and their emergency contacts (it is on the screen)")
     await _cancel(robot)
-    _task = asyncio.ensure_future(call_for_help(robot))
+    _task = asyncio.ensure_future(call_for_help(robot, ASKED_FOR_HELP))
     await asyncio.sleep(0)  # let it put CALLING 911 on the screen
     return Result(True, "the screen now says CALLING 911; tell them you are calling 911 and their emergency contacts")
 
@@ -328,7 +335,8 @@ async def emergency_response_tool(robot: Robot, okay: bool) -> Result:
 @tool(
     "collapse_watch",
     "Collapse watch, on from the start: if your camera sees someone collapsed on the floor, you walk"
-    " up to them, ask if they are okay and sound an alarm; with no answer, you say you are calling 911."
+    " up to them, ask if they are okay and sound an alarm; with no answer, you say you are calling 911 and"
+    " their emergency contacts, and their emergency contact is phoned."
     " Turn it off only when someone asks you to stop watching for falls; on again when they ask.",
     enabled=Param("boolean", "true to watch for people who collapse, false to stop."),
 )

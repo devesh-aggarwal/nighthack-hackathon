@@ -5,13 +5,16 @@
     python3 lab/test.py              # everything
 
 They run on test_tools.py's fake robot and fake clock, with a fake vision checker in place of
-vision/gemini_vision.py: it answers from a script instead of asking Gemini.
+vision/gemini_vision.py: it answers from a script instead of asking Gemini. A temporary contact
+file and a fake _place_call stand in for the emergency call: nobody is phoned.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -21,6 +24,7 @@ from test_tools import Rig, _Msg, _real_sleep, check, tools  # noqa: E402
 
 import collapse_watch as cw  # noqa: E402
 import deaf_mode  # noqa: E402
+import emergency  # noqa: E402
 import vision  # noqa: E402  blind mode's senses: the obstacle rule the approach's steps use
 
 NOBODY = {"down": False, "x": 0.5, "nearest_m": 99.0, "path_clear": True, "why": "an empty room"}
@@ -43,6 +47,19 @@ def ahead(nearest_m: float, clear: bool = True) -> dict:
     """Someone down straight ahead, the nearest part of them nearest_m away."""
     return {"down": True, "x": 0.5, "nearest_m": nearest_m, "path_clear": clear, "why": "a person on the floor"}
 
+
+CALLS: list[str] = []  # what the emergency contact would hear, one per call
+
+
+def _fake_call(contact: dict, message: str) -> tuple[bool, str]:
+    CALLS.append(message)
+    return True, "queued"
+
+
+emergency._place_call = _fake_call  # before anything runs: the real contact file may be on this machine
+emergency.CONTACT_FILE = Path(tempfile.mkdtemp()) / "emergency_contact.json"
+emergency.CONTACT_FILE.write_text(json.dumps({"name": "Sam", "to": "+15551234567", "from": "+15557654321",
+                                              "account_sid": "ACtest", "auth_token": "not-a-real-token"}))
 
 MOVES: list[tuple[str, float]] = []  # what the approach asked walk for: ("turn", deg) or ("walk", metres)
 _walk = cw.walk
@@ -83,6 +100,8 @@ class FakeVision:
 def fresh(*answers: dict) -> Rig:
     rig = Rig()
     MOVES.clear()
+    CALLS.clear()
+    emergency._last_call = 0.0
     cw.WATCHING, cw._stage, cw._task, cw._seen_in_row, cw._quiet_until = True, "", None, 0, 0.0
     deaf_mode.clear_display()
     eyes()
@@ -132,10 +151,10 @@ async def collapse_tests() -> None:
           abs(sum(a for k, a in did if k == "walk") - (2.0 - cw.STOP_AT_M)) < 0.05, str(did))
     evs = deaf_mode.EVENTS.since(before)
     shown = [(e["kind"], (e["display"] or {}).get("text"), (e["display"] or {}).get("siren")) for e in evs]
-    check("then: ARE YOU OKAY? flashing, then with the siren, then CALLING 911, then cleared",
+    check("then: ARE YOU OKAY? flashing, then with the siren, then CALLING 911 and the call, then cleared",
           shown == [("collapse", None, None), ("emergency", "ARE YOU OKAY?", False),
                     ("emergency", "ARE YOU OKAY?", True), ("emergency", "CALLING 911", False),
-                    ("emergency_end", None, None)], str(shown))
+                    ("emergency_call", None, None), ("emergency_end", None, None)], str(shown))
     ask, calling = evs[1], evs[3]
     check("the app asks \"Are you okay?\" out loud itself", ask["display"].get("say") == "Are you okay?",
           str(ask["display"]))
@@ -144,6 +163,9 @@ async def collapse_tests() -> None:
     check("the screen flashes red", ask["display"]["flash"] and ask["display"]["color"] == deaf_mode.URGENT_COLOR)
     check("with no answer, Gemini is told to say it is calling 911 and the emergency contacts",
           "911" in calling["for_gemini"] and "emergency contacts" in calling["for_gemini"], calling["for_gemini"])
+    check("... and the emergency contact is phoned, once, without anyone asking: someone collapsed and didn't answer",
+          len(CALLS) == 1 and "collapsed" in CALLS[0] and "didn't answer" in CALLS[0], str(CALLS))
+    check("... and the event says who was called", "calling Sam" in evs[4]["text"], evs[4]["text"])
     res = await cw.look_once(rig.ts)
     check("afterwards it is quiet for a while (no alarm again at once)", res == "quiet for now", res)
     rig.close()
@@ -199,7 +221,7 @@ async def collapse_tests() -> None:
     evs = deaf_mode.EVENTS.since(before)
     check("\"I'm okay\": the alarm stops, the screen clears, and nobody is called",
           res.ok and "nobody is called" in res.message and deaf_mode.display_state() is None and not cw._stage
-          and [e["kind"] for e in evs] == ["emergency_end"], f"{res.message} {evs}")
+          and [e["kind"] for e in evs] == ["emergency_end"] and not CALLS, f"{res.message} {evs} {CALLS}")
     res = await cw.look_once(rig.ts)
     check("... and it doesn't check on them again for a while", res == "quiet for now", res)
     rig.close()
@@ -212,6 +234,23 @@ async def collapse_tests() -> None:
     check("\"help me\": CALLING 911 right away", res.ok and "911" in res.message
           and deaf_mode.display_state()["text"] == "CALLING 911", f"{res.message} {deaf_mode.display_state()}")
     await asyncio.wait_for(cw._task, timeout=10)
+    check("... and the emergency contact is phoned: someone collapsed and asked for help",
+          len(CALLS) == 1 and "asked for help" in CALLS[0], str(CALLS))
+    rig.close()
+
+    # No contact set up: it still says so, and nobody is phoned.
+    rig = fresh(CLOSE)
+    contact = emergency.CONTACT_FILE.read_text()
+    emergency.CONTACT_FILE.unlink()
+    before = deaf_mode.EVENTS.last_id
+    await spot(rig)
+    await until(lambda: cw._stage == "alarm")
+    await tools.call(rig.ts, "emergency_response", {"okay": False})
+    await asyncio.wait_for(cw._task, timeout=10)
+    texts = [(e["display"] or {}).get("text") or e["text"] for e in deaf_mode.EVENTS.since(before)]
+    check("with no contact file: CALLING 911 is still shown, nobody is phoned, and the event says why",
+          "CALLING 911" in texts and not CALLS and any("no emergency contact" in t for t in texts), str(texts))
+    emergency.CONTACT_FILE.write_text(contact)
     rig.close()
 
     # A fallen robot doesn't walk, but still asks.
