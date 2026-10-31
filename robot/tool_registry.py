@@ -64,6 +64,7 @@ LAB_MODULES = [
     "vision", "blind_mode",  # find a thing and beep beside it, for people who can't see
     "debug_view",  # GET /debug: what blind mode's senses see (no tools)
     "collapse_watch",  # someone collapses in view -> walk up, ask, alarm, "calling 911"
+    "emergency",  # phone one emergency contact (never 911)
 ]
 
 

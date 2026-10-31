@@ -13,8 +13,9 @@ This repo is a working copy of CS 123 Lab 6 (*Bringing Your Pupper to Life*) wit
 done: all 11 TODOs written, and the sit-stay-shake and spider tricks trained and installed. It
 also has **deaf mode**, for people who are deaf or hard of hearing (see
 [Deaf mode](#deaf-mode)), **blind mode**, for people who are blind or have low vision (see
-[Blind mode](#blind-mode)), and **collapse watch**, for someone who collapses on the floor (see
-[Collapse watch](#collapse-watch)).
+[Blind mode](#blind-mode)), **collapse watch**, for someone who collapses on the floor (see
+[Collapse watch](#collapse-watch)), and can **phone one emergency contact** (see
+[Calling an emergency contact](#calling-an-emergency-contact)).
 
 How the robot works, in theory (lectures) and in practice (labs), is on the
 [CS 123 course site](https://cs123-stanford.readthedocs.io/en/latest/index.html): check there first
@@ -45,7 +46,8 @@ By voice (or text, with `lab/chat.py`):
 - **Deaf mode** (`deaf_mode`): say "I'm deaf", "I'm hard of hearing" or "deaf mode", and Pupper
   keeps listening. An urgent sound (siren, alarm, doorbell, knocking, crash, a baby crying) turns
   the whole screen red with what it was, in big letters, for as long as it lasts, and everything
-  Pupper says is captioned on its face. See [Deaf mode](#deaf-mode).
+  Pupper says is captioned on its face. If Pupper is standing, it also turns one slow circle so
+  the screen can be seen from anywhere in the room. See [Deaf mode](#deaf-mode).
 - **Blind mode** (`find`, `beacon`): "where is my cup?", "find my keys". Pupper looks, turns a full
   circle, roams the room if it must, walks up to the thing, and beeps beside it once a second so
   the person can walk to the sound. "Got it" stops the beep. "Beep so I can find you" beeps on its
@@ -55,6 +57,9 @@ By voice (or text, with `lab/chat.py`):
   an alarm for 10 seconds while its screen flashes red. With no "I'm okay", it says it is calling
   911 and their emergency contacts. **It only says so: no call is placed.** See
   [Collapse watch](#collapse-watch).
+- **Call for help** (`call_contact`): "call for help", "call Sam": Pupper phones the one emergency
+  contact set up on the robot (through Twilio) and a voice reads them what is happening. It can
+  never call 911. See [Calling an emergency contact](#calling-an-emergency-contact).
 
 ## What's where
 
@@ -67,12 +72,13 @@ By voice (or text, with `lab/chat.py`):
 │   ├── part3_follow.py  prepare_to_move, follow
 │   ├── part4_tricks.py  play_trick, play_policy_trick
 │   ├── part5_interactive_action.py  interactive_action
-│   ├── deaf_mode.py     deaf_mode: urgent sounds turn the screen red
+│   ├── deaf_mode.py     deaf_mode: urgent sounds turn the screen red (and Pupper turns a circle)
 │   ├── blind_mode.py    find and beacon: find a thing, walk up to it, beep beside it
 │   ├── vision.py        blind mode's senses: the eyes service's detector and depth, the obstacle rule
 │   ├── fisheye_geom.py  Lab 5's lens calibration: where in the world a pixel looks
 │   ├── debug_view.py    what the debug page (GET /debug) shows, and its STOP_BOTTOM tuning
 │   ├── collapse_watch.py  someone collapses in view: walk up, ask, alarm
+│   ├── emergency.py     call_contact: phone the emergency contact (never 911)
 │   ├── test.py          python3 lab/test.py      (tests on a fake robot: the lab's and every mode's)
 │   └── chat.py          python3 lab/chat.py      (talk to Gemini in text)
 ├── tricks/              one folder per trick (policy.json + trick.yaml)
@@ -80,7 +86,7 @@ By voice (or text, with `lab/chat.py`):
 │   └── spider_walk/     trained here: clip policy + walk_policy.json; covers spider, so it hides it
 ├── robot/               the Robot API, robot server, launch files, setup/start/stop scripts
 │                        (test_tools.py: the lab's tests; test_deaf_mode.py, test_blind_mode.py,
-│                        test_collapse.py: the modes'; debug.html: the debug page)
+│                        test_collapse.py: the modes'; test_emergency.py: the call's; debug.html: the debug page)
 ├── hearing/             the sound detector deaf mode uses: the meter, YAMNet, calibration
 ├── vision/              eyes.py: blind mode's eyes service (object detector, depth, Gemma), beside the robot server;
 │                        gemini_vision.py: collapse watch's camera check
@@ -188,6 +194,7 @@ python3 lab/test.py todo9      # one TODO
 python3 lab/test.py deaf       # deaf mode (robot/test_deaf_mode.py)
 python3 lab/test.py blind      # blind mode (robot/test_blind_mode.py); one group: blind find
 python3 lab/test.py collapse   # collapse watch (robot/test_collapse.py)
+python3 lab/test.py emergency  # the emergency call (robot/test_emergency.py; no network, no Twilio)
 python3 hearing/test_signal.py # the sound detector's signal chain (needs numpy and scipy)
 python3 lab/chat.py            # your prompt and tools, on a fake robot: nothing moves
 python3 lab/chat.py --show     # print every tool description as Gemini reads it, then chat
@@ -282,8 +289,8 @@ and installs it on the Pi. The user `pi` has passwordless `sudo`.
 
 ## Deaf mode
 
-`lab/deaf_mode.py`, `hearing/`, and the red alert screen in the web app. It is the one feature
-added to Lab 6.
+`lab/deaf_mode.py`, `hearing/`, and the red alert screen in the web app. It is added to Lab 6, like
+blind mode, collapse watch and the [emergency call](#calling-an-emergency-contact).
 
 **Turning it on.** The prompt has Gemini call `deaf_mode(enabled=true)` when the person says they
 are deaf or hard of hearing, or asks for deaf mode, and `deaf_mode(enabled=false)` when they ask
@@ -332,7 +339,47 @@ Setup and tuning:
 - **Mic gain:** the kiosk browser starts with `--disable-features=WebRtcAllowInputVolumeAdjustment`,
   so its auto gain can't move the mic volume.
 
-Nothing in deaf mode moves the robot: it only listens and paints the screen.
+**Turning to show it.** If Pupper is standing still in locomotion mode when an alert comes, it
+also turns one slow full circle to the left (36 deg/s for 10 s, `SPIN_S`: a normal queued turn,
+so `stop` cancels it and the fall checks apply) so the red screen faces everyone in the room. The
+screen stays red until the circle is done, even after a short sound (a knock) has stopped. Lying
+down, in a trick, following or already moving, it doesn't move: deaf mode never stands Pupper up
+on its own. While it turns, other sounds are taken for its motors and ignored, so a second alert
+can be missed for those 10 s. Before the first
+alert on the robot, make sure there is a clear circle around Pupper and a hand near the e-stop.
+
+## Calling an emergency contact
+
+`lab/emergency.py`: the `call_contact` tool. When someone asks Pupper to call for help or to call
+their contact, Gemini calls `call_contact(reason)`; the robot server asks
+[Twilio](https://www.twilio.com/docs/voice/api/call-resource) to place a real phone call, and when
+the contact picks up a voice reads "Pupper here. <reason>" twice. The tool has no number
+parameter: it can only call the one contact in the file below, so Gemini can't dial 911 or anyone
+else, and the prompt tells it never to say it called 911 (it tells the person to call 911
+themselves). One call a minute at most.
+
+Set it up on the Pupper (the file holds a Twilio token, so it lives outside the repo; never
+commit it):
+
+```bash
+mkdir -p ~/.config/gemini-pupper && nano ~/.config/gemini-pupper/emergency_contact.json
+chmod 600 ~/.config/gemini-pupper/emergency_contact.json
+```
+
+```json
+{"name": "Sam", "to": "+15551234567", "from": "+15557654321",
+ "account_sid": "AC...", "auth_token": "..."}
+```
+
+- `to` is the contact's phone, `from` your Twilio number, both in +country format. The SID and
+  token are on the Twilio console's front page.
+- On a **Twilio trial** account, `to` must first be added as a verified caller ID in the console,
+  and the call starts with a short trial announcement (the contact presses a key, then hears
+  Pupper's message). Caller ID shows the Twilio number, not "Pupper".
+- The Pupper needs internet. The tool needs no new packages (it uses Python's `urllib`).
+- The file is read on every call: editing it needs no restart. Changing `lab/emergency.py` does
+  (`robot/stop.sh && robot/start.sh`); then reconnect in the app to pick up the new prompt.
+- `python3 lab/chat.py` uses the same tool: on a machine that has the file, it places a real call.
 
 ## Blind mode
 
