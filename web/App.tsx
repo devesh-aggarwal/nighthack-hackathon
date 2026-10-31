@@ -8,6 +8,7 @@ import { GeminiLiveService } from './services/geminiLive';
 import RobotBridge from './services/robotBridge';
 import { RobotEvents } from './services/robotEvents';
 import { startSiren, stopSiren } from './services/siren';
+import { speak } from './services/speak';
 import { DEMO, runDemo } from './services/demo';
 
 // Icons
@@ -156,6 +157,7 @@ const App: React.FC = () => {
     const events = new RobotEvents(bridge, e => {
       if (e.display) showDisplay(e.display);
       else if (e.kind === 'sound_end' || e.kind === 'emergency_end') showDisplay(null);
+      if (e.display?.say) speak(e.display.say);  // collapse watch: "Are you okay?" out loud
     });
     events.start(250);  // 4 times a second, so the alert comes and goes with the sound
     return () => events.stop();

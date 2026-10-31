@@ -48,6 +48,7 @@ export interface ScreenDisplay {
   kind?: string; // "sound" or "emergency" takes over the whole screen
   flash?: boolean; // emergency: the red flashes on and off
   siren?: boolean; // emergency: the app sounds its siren (services/siren.ts)
+  say?: string; // spoken out loud once, when the event arrives (services/speak.ts)
 }
 
 /** Something that happened on the robot (GET /events): a sound, or someone collapsed. */

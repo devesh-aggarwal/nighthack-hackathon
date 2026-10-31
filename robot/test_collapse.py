@@ -137,7 +137,9 @@ async def collapse_tests() -> None:
                     ("emergency", "ARE YOU OKAY?", True), ("emergency", "CALLING 911", False),
                     ("emergency_end", None, None)], str(shown))
     ask, calling = evs[1], evs[3]
-    check("Gemini is told to ask \"Are you okay?\" out loud", "Are you okay?" in ask["for_gemini"]
+    check("the app asks \"Are you okay?\" out loud itself", ask["display"].get("say") == "Are you okay?",
+          str(ask["display"]))
+    check("Gemini is told it asked \"Are you okay?\" and how to answer", "Are you okay?" in ask["for_gemini"]
           and "emergency_response" in ask["for_gemini"], ask["for_gemini"])
     check("the screen flashes red", ask["display"]["flash"] and ask["display"]["color"] == deaf_mode.URGENT_COLOR)
     check("with no answer, Gemini is told to say it is calling 911 and the emergency contacts",

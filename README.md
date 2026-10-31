@@ -523,7 +523,9 @@ stream on slow Wi-Fi; see [Slow Wi-Fi](#slow-wi-fi)).
    face them. Turns use the `move` code; the move limits, fall checks and `stop` apply to both.
    If the way isn't clear, or it can't walk (fallen over, stopped, lost sight of them), it asks
    from where it is.
-2. **Ask.** The screen turns red and flashes "ARE YOU OKAY?", and Gemini is told to ask out loud.
+2. **Ask.** The screen turns red and flashes "ARE YOU OKAY?", and Pupper says "Are you okay?" out
+   loud with the browser's own speech (`web/services/speak.ts`), so it asks even if Gemini isn't
+   connected or stays quiet. Gemini is told it asked, and listens for the answer.
 3. **Alarm.** After 3 s, a two-tone siren (Web Audio, `web/services/siren.ts`) sounds for 10 s
    while the screen keeps flashing.
 4. **"Calling 911".** If nobody has said they are fine, the screen says CALLING 911 and Gemini

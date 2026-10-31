@@ -12,7 +12,8 @@ Pupper:
      eyes service's depth and object detector) seeing right now; that sense is checked on every
      tick of the step, which stops the moment anything is close ahead. Without it Pupper only
      turns to face them. move's limits, fall checks and stop all apply.
-  2. asks "Are you okay?": the screen turns red and flashes, and Gemini is told to ask out loud,
+  2. asks "Are you okay?": the screen turns red and flashes, and the app says it out loud (browser
+     speech, so it is asked even if Gemini stays quiet); Gemini is told it asked and listens,
   3. sounds its alarm for ALARM_S: the web app plays a siren while the screen keeps flashing,
   4. if nobody has said they are fine by then, says it is calling 911 and their emergency
      contacts (the screen says CALLING 911). It only says so: no call is placed.
@@ -56,8 +57,9 @@ CALLING_SHOW_S = 60.0  # CALLING 911 stays on the screen this long
 QUIET_AFTER_OK_S = 300.0  # after "I'm okay", don't check on anyone for this long
 QUIET_AFTER_CALL_S = 120.0
 
+SAY_ASK = "Are you okay?"  # the app speaks this itself (web/services/speak.ts)
 ASK = ("[Emergency, from your camera] Someone is lying on the floor and may have collapsed; you have walked up"
-       " to them. Ask them right now, out loud, in one short sentence: \"Are you okay?\" If they say they are"
+       " to them and just asked them out loud: \"Are you okay?\" Don't ask again; listen. If they say they are"
        " fine, call emergency_response with okay true. If they ask for help or say they are hurt, call it with"
        " okay false. Your alarm will sound for 10 seconds; if nobody says they are fine, you call 911.")
 CALLING = ("[Emergency] Nobody said they are okay. Say out loud, in one short sentence: \"I'm calling 911 and"
@@ -71,12 +73,15 @@ _quiet_until = 0.0  # robot.now() time: no checks until then
 
 
 # ============================================================ what the robot does: the screen
-def show_emergency(text: str, detail: str, seconds: float, *, siren: bool, for_gemini: str = "") -> dict:
-    """The whole screen red and flashing; with siren=True the app sounds its siren too."""
+def show_emergency(text: str, detail: str, seconds: float, *, siren: bool, for_gemini: str = "",
+                   say: str = "") -> dict:
+    """The whole screen red and flashing; with siren=True the app sounds its siren too, and it speaks ``say``."""
     DISPLAY.update(text=text, detail=detail, color=URGENT_COLOR, until=time.time() + seconds, kind="emergency",
                    flash=True, siren=siren)
     payload = {"text": text, "detail": detail, "color": URGENT_COLOR, "seconds": seconds, "kind": "emergency",
                "flash": True, "siren": siren}
+    if say:
+        payload["say"] = say
     return EVENTS.emit("emergency", f"screen: {text}" + (" (siren)" if siren else ""), payload, for_gemini)
 
 
@@ -259,7 +264,7 @@ async def emergency(robot: Robot, seen: dict) -> None:
     log.info("collapse: %s", how)
     _stage = "ask"
     detail = "Say \"I'm okay\" if you are. If not, Pupper calls 911."
-    show_emergency("ARE YOU OKAY?", detail, ASK_S + ALARM_S, siren=False, for_gemini=ASK)
+    show_emergency("ARE YOU OKAY?", detail, ASK_S + ALARM_S, siren=False, for_gemini=ASK, say=SAY_ASK)
     await robot.sleep(ASK_S)
     _stage = "alarm"
     show_emergency("ARE YOU OKAY?", detail, ALARM_S, siren=True)
