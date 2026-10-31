@@ -55,8 +55,10 @@ def has_mic() -> bool:
 
 
 class Hearing:
-    def __init__(self, on_event: Callable[[dict], None], device: str = "pulse"):
+    def __init__(self, on_event: Callable[[dict], None], device: str = "pulse",
+                 on_tick: Callable[[dict], None] | None = None):
         self.on_event = on_event
+        self.on_tick = on_tick  # every 0.5 s, YAMNet's group scores: is the sound still going on?
         self.device = device
         self.enabled = False
         self.stream = None
@@ -161,6 +163,7 @@ class Hearing:
                         now = view["now"]
                         self.hears = {"label": now[0] if now else None, "confidence": now[1] if now else 0.0,
                                       "t": time.time()}
+                        self._call(self.on_tick, view["groups"])
                     for ev in evs:
                         self._heard(ev)
             if blocks % 2 == 0 and recent:
@@ -180,8 +183,14 @@ class Hearing:
     def _heard(self, ev: dict) -> None:
         self.heard += 1
         log.info("heard %s: %.1f, %s", ev["cls"], ev["score"], ev["info"])
+        self._call(self.on_event, ev)
+
+    @staticmethod
+    def _call(fn: Callable[[dict], None] | None, arg: dict) -> None:
+        if fn is None:
+            return
         try:
-            self.on_event(ev)
+            fn(arg)
         except Exception:  # a bug in what reacts must not stop the listening
             log.exception("hearing callback failed")
 

@@ -3,8 +3,8 @@ import { RobotEvent } from "../types";
 
 /**
  * Events are things that happened on the robot that nobody asked for right then: the
- * microphone heard a doorbell or a smoke alarm, a walk stopped early. The robot server collects them (GET /events?after=<id>); this polls
- * once a second and hands each new one to onEvent. Two of these run at once: the app's
+ * microphone heard a doorbell or a smoke alarm, and when it stopped. The robot server collects them (GET /events?after=<id>); this polls
+ * every intervalMs (the app: 4 times a second) and hands each new one to onEvent. Two of these run at once: the app's
  * (to paint the screen, even while Pupper sleeps) and the Gemini session's (to tell
  * Gemini). Each keeps its own cursor, and a fresh one starts at "now" (after=-1), so
  * old events are never replayed.

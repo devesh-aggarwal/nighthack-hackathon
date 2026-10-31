@@ -44,7 +44,7 @@ async def call(rig: Rig, tool: str, **args):
 
 
 def heard(rig: Rig, cls: str, label: str = "") -> object:
-    deaf_mode._last_alert = 0.0  # one alert at a time: start each check fresh
+    deaf_mode._showing = ""  # start each check with nothing on the screen
     info = {"label": label, "confidence": 0.8} if label else {}
     return deaf_mode.hearing_detected(rig.ts, {"cls": cls, "score": 50.0, "info": info})
 
@@ -77,19 +77,35 @@ async def deaf_tests() -> None:
 
     res = heard(rig, "speech", "Speech")
     check("speech is not an urgent sound", "not an urgent" in res.message, res.message)
-    deaf_mode._last_alert = 0.0
-    deaf_mode.hearing_detected(rig.ts, {"cls": "bang", "score": 50.0})
-    res = deaf_mode.hearing_detected(rig.ts, {"cls": "siren", "score": 80.0})
-    check("a second sound right after is ignored (one alert at a time)", "already" in res.message, res.message)
-    res = deaf_mode.hearing_detected(rig.ts, {"cls": "knock", "score": 60.0})
-    check("... but a knock right after a LOUD BANG replaces it with KNOCKING",
-          deaf_mode.display_state()["text"] == "KNOCKING", res.message)
+    for cls in ("shout", "bang"):
+        res = heard(rig, cls)
+        check(f"a {cls} is not urgent any more (too many false alarms)", "not an urgent" in res.message, res.message)
+
+    # The alert lasts as long as the sound: hearing_tick gets YAMNet's scores every 0.5 s.
+    heard(rig, "siren", "Siren")
+    before = deaf_mode.EVENTS.last_id
+    res = deaf_mode.hearing_detected(rig.ts, {"cls": "siren", "score": 70.0})
+    check("the same sound again while it shows is one alert, not a new one",
+          "already" in res.message and deaf_mode.EVENTS.since(before) == [], res.message)
+    deaf_mode.hearing_tick({"siren": 0.6})
+    check("while YAMNet still hears the siren, SIREN stays", deaf_mode.display_state()["text"] == "SIREN")
+    deaf_mode.hearing_tick({"siren": 0.02})
+    check("... and a moment of quiet within MIN_SHOW_S doesn't clear it yet", deaf_mode.display_state() is not None)
+    deaf_mode._last_heard -= deaf_mode.MIN_SHOW_S
+    deaf_mode.hearing_tick({"siren": 0.02})
+    evs = deaf_mode.EVENTS.since(before)
+    check("once the siren stops, the screen clears right away, and the app is told (sound_end)",
+          deaf_mode.display_state() is None and [e["kind"] for e in evs] == ["sound_end"], str(evs))
+    heard(rig, "knock")
+    res = deaf_mode.hearing_detected(rig.ts, {"cls": "crash", "score": 60.0, "info": {"label": "Glass", "confidence": 0.5}})
+    check("a different urgent sound replaces the one on the screen at once", deaf_mode.display_state()["text"] == "CRASH",
+          res.message)
     rig.ts.busy_until = rig.ts.now() + 3.0  # a motion job is running
-    res = heard(rig, "bang")
-    check("while Pupper moves, a bang is its own motors: ignored", "motors" in res.message, res.message)
+    res = heard(rig, "knock")
+    check("while Pupper moves, a knock is its own motors: ignored", "motors" in res.message, res.message)
     rig.ts.busy_until = rig.ts.now() - 10.0
     deaf_mode.DISPLAY["until"] = time.time() - 1
-    check("after URGENT_SECONDS the screen is clear", deaf_mode.display_state() is None)
+    check("with no word from YAMNet, the screen clears after MAX_SHOW_S", deaf_mode.display_state() is None)
 
     res = await call(rig, "deaf_mode", enabled=False)
     check("deaf_mode(false) turns it off and stops the detector", res.ok and not deaf_mode.DEAF_MODE
