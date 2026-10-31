@@ -1,17 +1,11 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
-# Gemini Pupper (CS 123 Lab 6, finished)
+# Gemini Pupper
 
 Talk to Pupper, and it listens, looks and does what you ask. Gemini Live is the brain: a
 foundation model that hears you, sees through the camera and talks back. Trained policies are
 the muscles. In between are the tools: the only way Gemini can move the robot, and the only way
 it learns what really happened.
 
-This repo is a working copy of CS 123 Lab 6 (*Bringing Your Pupper to Life*) with every part
-done: all 11 TODOs written, and the sit-stay-shake and spider tricks trained and installed. It
-also has **deaf mode**, for people who are deaf or hard of hearing (see
+The pupper features **deaf mode**, for people who are deaf or hard of hearing (see
 [Deaf mode](#deaf-mode)), **blind mode**, for people who are blind or have low vision (see
 [Blind mode](#blind-mode)), **collapse watch**, for someone who collapses on the floor (see
 [Collapse watch](#collapse-watch)), and can **phone one emergency contact** (see
