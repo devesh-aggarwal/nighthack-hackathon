@@ -10,6 +10,8 @@ let timer: number | null = null;
 const HIGH_HZ = 960;
 const LOW_HZ = 770;
 const SWITCH_MS = 500;
+// Kept low, about as loud as blind mode's beep, for demos in a crowded room. Raise it for real use.
+const SIREN_GAIN = 0.08;
 
 export function startSiren() {
   if (timer !== null) return;
@@ -17,7 +19,7 @@ export function startSiren() {
     ctx = ctx ?? new (window.AudioContext || (window as any).webkitAudioContext)();
     ctx.resume().catch(() => {});
     gain = ctx.createGain();
-    gain.gain.value = 0.25;
+    gain.gain.value = SIREN_GAIN;
     gain.connect(ctx.destination);
     osc = ctx.createOscillator();
     osc.type = 'square';
