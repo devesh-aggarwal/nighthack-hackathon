@@ -322,7 +322,9 @@ listens through PipeWire next to the kiosk:
 
 - **Sirens, alarms, doorbells, crashes and a baby crying:** Google's YAMNet
   (`hearing/classify.py`, AudioSet's 521 classes through LiteRT, on-device, about 1.5 ms per
-  0.5 s).
+  0.5 s). A siren counts from a lower score (0.2, the same bar that puts its name in the
+  screen's corner) and only 3 dB over the room, because YAMNet spreads a police siren over
+  several classes; and it can come back 1.5 s after a gap in its wail.
 - **Knocking:** the calibrated meter's rhythm detector (`hearing/meter.py`, `hearing/detect.py`),
   with thresholds in dB above the room's noise floor; YAMNet drops knocks that were really speech.
   The meter also reports bangs and shouts, but they are not urgent: on loudness alone they gave
